@@ -7,16 +7,14 @@ distribution rights.
 
 BEFORE BUILDING, TESTING AND INSTALLING this you will need to:
 
-    1) Install Oracle RDB with development option (SQLMOD is needed),
-       since i don't know if it legally OK to distribute object modules.
-    2) Install the DBI module (I tested with DBI 1.23)
+    Install the DBI module
 
 BUILDING
 
     Unpack the DBD::RDB files and 
 	    perl Makefile.PL
-	    mmk                    (or mms)
-	    mmk test
-	    mmk install
+	    mms OR mmk
+	    mms install
+    The test script is up to now an example and not a standard perl test 
 
 End.

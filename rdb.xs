@@ -11,7 +11,7 @@ INCLUDE: Rdb.xsi
 MODULE = DBD::RDB      PACKAGE = DBD::RDB::db
 
 void
-_do(dbh, statement)
+do(dbh, statement)
     SV *	dbh
     SV *	statement
     CODE:
@@ -19,6 +19,6 @@ _do(dbh, statement)
     STRLEN lna;
     D_imp_dbh(dbh);
     char *stmt = (SvOK(statement)) ? SvPV(statement,lna) : "";
-    ST(0) = sv_2mortal(newSViv(rdb_db_do(dbh, imp_dbh, stmt)));
+    ST(0) = rdb_db_do(dbh, imp_dbh, stmt) ? &sv_yes : &sv_no;
     }
 

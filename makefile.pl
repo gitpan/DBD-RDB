@@ -1,25 +1,22 @@
 # -*- perl -*-
 
-require 5.005;
+require 5.004;
 use strict;
-use vmsish;
+
 use ExtUtils::MakeMaker;
 use DBI::DBD;
-use Config;
-
-my $obj_ext = $Config{'obj_ext'} || '.obj';
 
 my %opts =
     ('NAME' => 'DBD::RDB',
-     'DISTNAME' => 'DBD_RDB',
-     'AUTHOR' => 'Andreas Stiller (andreas.stiller@nospam.eds.com)',
-     'PMLIBDIRS' => [qw(DBD)],
-     'VERSION_FROM' => 'rdb.pm',
-     'INC' => 'perl_root:[lib.site_perl.VMS_AXP.auto.dbi]',
-     'C' => [ qw(dbdimp.c) ],
-     'OBJECT' => "rdb$obj_ext dbdimp$obj_ext dbdsql$obj_ext",
-    clean => { FILES => 'test.rdb test.snp rdb.xsi dbdsql.h *.tar-gz' },
-    dist  => {  DIST_DEFAULT    => 'clean distcheck disttest zipdist'}
+     'AUTHOR' => 'Andreas Stiller (andreas.stiller@eds.com)',
+     'VERSION_FROM' => 'RDB.pm',
+     'INC' => 'PERL_ROOT:[LIB.DBI]',
+     'XS' => 'rdb.xs',
+     'C' => 'dbdimp.c',
+     'OBJECT' => 'rdb.obj dbdimp.obj dbdsql.obj',
+     'dist'         => { 'SUFFIX'       => ".gz",
+			 'DIST_DEFAULT' => 'all tardist',
+			 'COMPRESS'     => "gzip -9vf" }
      );
 
 
@@ -31,11 +28,6 @@ package MY;
 sub postamble {
 DBI::DBD::dbd_postamble().
 "
-.FIRST
-      @ define/nolog lnk\$library sys\$library:sql\$user.olb
-      @ tar :== vmstar
-      @ set proc/parse=trad
-
 .SUFFIXES .sqlmod
 
 .sqlmod.obj :
