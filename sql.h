@@ -4,6 +4,8 @@
 #pragma __member_alignment __save
 #pragma __nomember_alignment 
 
+#define MAX_VARCHAR 65269
+
 typedef struct _sql_t_sqlvar2 {
     short int sqltype;
     short sqllen;
@@ -56,10 +58,11 @@ typedef struct {
 } sql_t_varchar;
 
 typedef struct {
-    short len;
+    unsigned short len;
     char buf[1];
 } sql_t_varchar_w;
  
+
 #pragma __member_alignment __restore
 
 #endif

@@ -1,15 +1,34 @@
-Version 1.15
+Version 1.16, (1.6.2002)
+
+New Features:
+        1) Named parameter markers
+        2) bind_param_input
+        => Stored procedures with IN,OUT and INOUT parameters are usable
+        3) support for date INTERVALs
+        4) more testing
+        5) little bit more docu
 
 Bugs fixed:
-	1) 'Statement' attribute of statement handle is now handled by DBI
+        1) makefile now use a $SET PROC/PARSE=TRAD
+        2) memory leaks in fetch_attrib for sth and dbh
+
+tested with:
+        RDB 7.1, VMS 7.3
+        DBI 1.23
+        PERL 5.6.1 and 5.7.3 (DBI needed manual intervention to compile here)
+
+Version 1.15, (6.8.2001)
+
+Bugs fixed:
+        1) 'Statement' attribute of statement handle is now handled by DBI
            and not from driver 
         2) Makefile defines LNK$LIBRARY to use SYS$LIBRARY:SQL$USER.OLB
 
 Version 1.14
 
 Bugs fixed:
-	1) a string sent from perl to RDB was cut at the first \000 eventually
-	taking not the full length. This disabled working with DBKEYs.
+        1) a string sent from perl to RDB was cut at the first \000 eventually
+	   taking not the full length. This disabled working with DBKEYs.
 
 
 Version 1.13

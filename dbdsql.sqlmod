@@ -47,8 +47,8 @@ procedure dbdsql_rollback
 
 
 procedure dbdsql_prepare
-    sqlcode,
-    :stmt_text varchar(2000),
+    sqlca,
+    :stmt_text varchar(65269),
     :stmt_name char(15);
 
     prepare :stmt_name from :stmt_text;
@@ -74,17 +74,18 @@ procedure dbdsql_describe_select
     describe :stmt_name select list into sqlda;
 
 procedure dbdsql_do
-    sqlcode,
-    :statement varchar(2000);
+    sqlca,
+    :statement varchar(65269);
 
     execute immediate :statement;
  
 procedure dbdsql_execute
-    sqlcode,
+    sqlca,
     :stmt_name char(15),
-    sqlda;
+    :in sqlda
+    :out sqlda;
 
-    execute :stmt_name using descriptor sqlda;
+    execute :stmt_name into descriptor :out using descriptor :in;
 
 procedure dbdsql_declare_cursor
     sqlcode,

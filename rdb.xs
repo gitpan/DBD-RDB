@@ -19,6 +19,6 @@ _do(dbh, statement)
     STRLEN lna;
     D_imp_dbh(dbh);
     char *stmt = (SvOK(statement)) ? SvPV(statement,lna) : "";
-    ST(0) = rdb_db_do(dbh, imp_dbh, stmt) ? &sv_yes : &sv_no;
+    ST(0) = sv_2mortal(newSViv(rdb_db_do(dbh, imp_dbh, stmt)));
     }
 

@@ -20,6 +20,7 @@
 	int connection;
 	int statement_nr;
 	int cursor_nr;
+	int overflow_kills;
 	char date_format[256];
 	int date_len;
         unsigned int date_in_context;
@@ -33,12 +34,15 @@
 	SV *sth;
 	sql_t_varchar_w *stmt;
 	char stmt_name[16];
+	int is_select;
 	char cur_name[16];
-	int hold;
-	short *original_type;
-	int *original_size;
+	HV *attribs;
 	sql_t_sqlda2 *in_sqlda;
 	sql_t_sqlda2 *out_sqlda;
+	sql_t_sqlda2 *in_meta_sqlda;
+	sql_t_sqlda2 *out_meta_sqlda;
+	SV **bind_attribs;
+	SV **bind_value;
    };
 
    /*  Rename functions for avoiding name clashes; prototypes are  */

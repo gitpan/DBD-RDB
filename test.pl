@@ -1,544 +1,1033 @@
+use Devel::Peek qw( :ALL );
 use DBI;
 use strict;
 
-my $print_error = 0;
-print "1..45\n";
+$ENV{'SYS$LANGUAGE'} = 'ENGLISH';
+
+my $debug = $ENV{DBD_RDB_DEBUG};
+my ( $dbh, $sth, @types );
+my $cur_test = 1;
+my $std_attribs = { RaiseError => 0, PrintError => 0, AutoCommit => 0 };
+my @types = (
+    { sql_text => 'CHAR(111)', type => 453, precision => 111 },
+    { sql_text => 'VARCHAR(12345)', type => 449, precision => 12345 },
+    { sql_text => 'TINYINT', type => 515, precision => 2 },
+    { sql_text => 'TINYINT(1)', type => 515, precision => 2, scale => 1 },
+    { sql_text => 'SMALLINT', type => 501, precision => 4 },
+    { sql_text => 'SMALLINT(3)', type => 501, precision => 4, scale => 3 },
+    { sql_text => 'INTEGER', type => 497, precision => 9 },
+    { sql_text => 'INTEGER(6)', type => 497, precision => 9, scale => 6 },
+    { sql_text => 'BIGINT', type => 505, precision => 18 },
+    { sql_text => 'BIGINT(10)', type => 505, precision => 18, scale => 10 },
+    { sql_text => 'DATE VMS', type => 503, precision => 22 },
+	# precision is length of last $dbh->{rdb_dateformat}
+    { sql_text => 'FLOAT', type => 481, precision => 15 },
+    { sql_text => 'FLOAT(24)', type => 481, precision => 6 },
+    { sql_text => 'INTERVAL YEAR(6) TO MONTH', type => 521, precision => 17 },
+    { sql_text => 'INTERVAL DAY(6) TO SECOND(2)', type => 521, precision => 19 }
+       # RDB allows not determine the INTERVAL subtype, therefore the prec is
+       # estimated with an upper bound using the longest format
+       # DAY(scale) TO SECOND(precision) 
+       # This upper bound is the sum of
+       # 1           for sign
+       # scale       for days
+       # precision   for subseconds
+       # 6           for hours, minutes, seconds
+       # 4           for delimiters : : : .
+       # (scale and precision are delivered from RDB, but not the subtype)       
+);
+my @tests = qw ( 
+    test_load_dbd
+    test_connect_error
+    test_create_db
+    test_connect
+    test_do_set_trans_rw
+    test_char_unchopped
+    test_varchar_unchopped 
+    test_char_chopped 
+    test_varchar_chopped 
+    test_tinyint_unchecked 
+    test_tinyint_checked 
+    test_smallint_unchecked 
+    test_smallint_checked 
+    test_integer_unchecked 
+    test_integer_checked 
+    test_bigint 
+    test_tinyint_scaled 
+    test_smallint_scaled 
+    test_integer_scaled 
+    test_double 
+    test_float 
+    test_date_1 
+    test_date_2 
+    test_interval_1 
+    test_interval_2
+    test_create_all_types 
+    test_NAME 
+    test_NAME_lc 
+    test_NAME_uc 
+    test_PRECISION 
+    test_SCALE 
+    test_TYPE 
+    test_NULLABLE 
+    test_CursorName 
+    test_NUM_OF_FIELDS 
+    test_NUM_OF_PARAMS
+    test_hold_and_current_of
+    test_bind
+    test_bind_by_name
+    test_get_info
+ );
+
+
+print "1..", scalar(@tests), "\n";
+foreach my $test ( @tests ) {
+    print "---- Start $test ----\n" if $debug;
+
+    my $errors;
+    DBI->trace(4) if $debug =~ /$test/i;
+    eval {
+	no strict 'refs';
+	&{$test}();
+    };
+    DBI->trace(0);
+
+    if ( !$@ ) {
+	print "ok $cur_test\n";
+    } else {
+	print "not ok $cur_test\n";
+	print "$@\n" if $debug;
+    }
+    $cur_test++;
+}
+
+########################## TEST ROUTINES ################################
+
 
 #
 #  load driver
 #
-my $ok = require DBD::RDB;
-printf("%sok 1\n", ($ok ? "" : "not "));
-
-#
-# create test database;
-#
-eval {
-    my $dbh = DBI->connect( 'dbi:RDB:', undef, undef,
-			{ RaiseError => 0, 
-			  PrintError => $print_error, 
-			  AutoCommit => 0 } );
-    $dbh->do('create database filename test');
-    $dbh->disconnect;
-};
-printf("%sok 2\n", ($@ ? "not" : ""));
+sub test_load_dbd {
+    my $ok = require DBD::RDB;
+    check( $ok, 'require of DBD::RDB' );
+}
 
 #
 # try to connect to a non existing database, expect error
 #
-my $dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME XXXX.RDB', undef, undef,
-                        { RaiseError => 0,
-			  PrintError => $print_error, 
-			  AutoCommit => 0 } );
-printf("%sok 3\n", (($DBI::errstr =~ /RDB\-E\-BAD_DB_FORMAT/) ? "" : "not "));
+sub test_connect_error {
+    my $dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME XXXX.RDB', 
+		            "", "", $std_attribs );
+    my $ok = ($DBI::errstr =~ /RDB\-E\-BAD_DB_FORMAT/);
+    check( $ok, 'connect to non existing DB', $DBI::errstr );
+}
 
 #
-# connect to fresh test database
+#  create test database
+#  Additionally test return value of $dbh->do for non-select
 #
-$dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME TEST.RDB', undef, undef,
-                     { RaiseError => 0,
-	               PrintError => $print_error, 
-		       AutoCommit => 0,
-		       ChopBlanks => 1 } );
-printf("%sok 4\n", ($dbh ? "" : "not "));
-
+sub test_create_db {
+    $dbh = DBI->connect( 'dbi:RDB:', undef, undef, $std_attribs );
+    check ( $dbh, 'connect', $DBI::errstr );
+    my $ok = $dbh->do('CREATE DATABASE FILENAME TEST.RDB'); 
+    check ( $ok == "0E0", 'CREATE DATABASE', $DBI::errstr );
+    check ( $dbh->disconnect, 'disconnect', $DBI::errstr );
+}    
 #
-#  create test table
+#  connect to test database again and keep dbh
 #
-$ok = $dbh->do( "set transaction read write" );
-printf("%sok 5\n", (( $ok && !$DBI::errstr) ? "" : "not "));
-
-$ok = $dbh->do( q/create table dummy (  
-		    col_char char(15),
-		    col_varchar varchar(30),
-		    col_int int,
-		    col_float float,
-		    col_date date vms,
-		    col_decimal decimal(5),
-		    col_quad bigint,
-		    col_intp2 int(2) ) / );
-printf("%sok 6\n", (( $ok && !$DBI::errstr) ? "" : "not "));
-
-$ok = $dbh->commit;
-printf("%sok 7\n", (( $ok && !$DBI::errstr) ? "" : "not "));
-
+sub test_connect {
+    $dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME TEST.RDB',
+	                 "", "", $std_attribs );
+    check( $dbh, 'connect', $DBI::errstr );
+}
 
 #
-# get back default dateformat
+# set trans read write => to test 'do' and 'do' error handling
 #
-my $df = $dbh->{rdb_dateformat};
-$ok = ( $df eq "|!Y4!MN0!D0|!H04!M0!S0!C2|" );
-printf("%sok 8\n", (( $ok && !$DBI::errstr) ? "" : "not "));
+sub test_do_set_trans_rw {
+    my $ok;
 
-#
-# check ChopBlanks is on
-#
-my $cb = $dbh->{ChopBlanks};
-$ok = ( $cb == 1 );
-printf("%sok 9\n", (( $ok && !$DBI::errstr) ? "" : "not "));
+    $ok = $dbh->do('SET TRANSACTION READ WRITE');
+    check( $ok == "0E0", 'do of SET TRANS READ WRITE', $DBI::errstr );
 
-#
-#  start read write again to insert something
-#
-$ok = $dbh->do( 'set transaction read write');
-printf("%sok 10\n", (( $ok && !$DBI::errstr) ? "" : "not "));
+    $ok = $dbh->commit;
+    check( $ok, 'COMMIT', $DBI::errstr );
 
-#
-#  prepare insert
-#
-my $st_text = q/
-insert into dummy (
-   col_char,
-   col_varchar,
-   col_int,
-   col_float,
-   col_date,
-   col_decimal,
-   col_quad,
-   col_intp2 )
-values ( ?, ?, ?, ?, ?, ?, ?, ? )/;
-my $st = $dbh->prepare( $st_text );
-printf("%sok 11\n", (( $ok && !$DBI::errstr) ? "" : "not "));
+    $ok = $dbh->rollback;
+    check( !$ok, 'ROLLBACK', 'unexpected success' );
+
+    check( ($DBI::errstr eq
+            "%SQL-F-NOIMPTXN, no implicit transaction to commit or rollback"),
+            'test DBI::errstr for double rollback (NOIMPTXN)', $DBI::errstr );
+}
 
 #
-# check some statement handle attributes
+#  INSERT/FETCH of CHAR without option "chop"
 #
-$ok = ( $st->{Statement} eq $st_text );
-printf("%sok 12\n", (( $ok ) ? "" : "not "));
+sub test_char_unchopped {
+    my $vals = [
+	{ in => 'abcde' },
+	{ in => 'abc ', out => 'abc  ' },
+	{ in => '123456', out => '12345' },
+	{ in => undef },
+	{ in => 999, out => '999  ' },
+	{ in => "", out => '     ' } ];
+    
+    $dbh->{ChopBlanks} = 0;
+    my $chopped = $dbh->{ChopBlanks};
+    check( !$chopped, 'set ChopBlanks = 0', $DBI::errstr );
 
-$ok = ( $st->{NUM_OF_PARAMS} == 8 );
-printf("%sok 13\n", (( $ok ) ? "" : "not "));
+    test_data_type( "CHAR(5)", 0, $vals  );
+}
 
-$ok = ( $st->{NUM_OF_FIELDS} == 0 );
-printf("%sok 14\n", (( $ok ) ? "" : "not "));
-
-#
-#  now two inserts
-#
-my $col_char_t1		= 'Abcdef';
-my $col_varchar_t1	= 'skjdsdalskhd';
-my $col_int_t1		= 12345;
-my $col_float_t1        = 7654.12E12;
-my $col_date_t1		= '19630709';
-my $col_decimal_t1	= 54321;
-my $col_quad_t1		= '123456789012';
-my $col_intp2_t1	= '321.12';
-
-$ok = $st->execute( 
-    $col_char_t1,
-    $col_varchar_t1,
-    $col_int_t1,
-    $col_float_t1,
-    $col_date_t1,
-    $col_decimal_t1,
-    $col_quad_t1,
-    $col_intp2_t1 );
-printf("%sok 15\n", (( $ok && !$DBI::errstr) ? "" : "not "));
-
-my $col_char_t2		= 'BCDEFGHJ';
-my $col_varchar_t2	= 'jhfjsdhfshfkljhd';
-my $col_int_t2		= 4242442;
-my $col_float_t2        = -123.5678E100;
-my $col_date_t2		= '20000229 120030';
-my $col_decimal_t2	= -54321; 
-my $col_quad_t2		= '-98765432101';
-my $col_intp2_t2	= '-44.44';
-
-$ok = $st->execute( 
-    $col_char_t2,
-    $col_varchar_t2,
-    $col_int_t2,
-    $col_float_t2,
-    $col_date_t2,
-    $col_decimal_t2,
-    $col_quad_t2,
-    $col_intp2_t2 );
-printf("%sok 16\n", (( $ok && !$DBI::errstr) ? "" : "not "));
-
-
-$ok = $dbh->commit;
-printf("%sok 17\n", (( $ok && !$DBI::errstr) ? "" : "not "));
 
 #
-#  prepare select to check the inserted values;
+#  INSERT/FETCH of VARCHAR without option "chop"
 #
-$ok = $dbh->do( 'set transaction read only');
-printf("%sok 18\n", (( $ok && !$DBI::errstr) ? "" : "not "));
+sub test_varchar_unchopped {
+    my $vals = [
+	{ in => 'ABCdEFG' },
+	{ in => 'GULP' },
+	{ in => '123456789', out => '12345678' },
+	{ in => undef },
+	{ in => -101.12, out => '-101.12' },
+	{ in => '' } ];
+	
+    test_data_type( "VARCHAR(8)", 0, $vals  );
+}
 
-$st = $dbh->prepare( q/
-select col_char, col_varchar, col_int, col_float as col_floating,
-       col_date, col_decimal, col_quad, col_intp2
-  from dummy
- order by col_char /);
-printf("%sok 19\n", (( $st && !$DBI::errstr) ? "" : "not "));
 
-#
-#  check the NAME attribute (name of the select columns)
-#
-$ok = ( $st->{NUM_OF_FIELDS} == 8 );
-printf("%sok 20\n", (( $ok ) ? "" : "not "));
-
-my $names = $st->{NAME};
-$ok = ( 8 == @$names &&
-        $$names[0] eq "COL_CHAR" &&
-	$$names[1] eq "COL_VARCHAR" &&
-	$$names[2] eq "COL_INT" &&
-	$$names[3] eq "COL_FLOATING" &&
-	$$names[4] eq "COL_DATE" &&
-	$$names[5] eq "COL_DECIMAL" &&
-	$$names[6] eq "COL_QUAD" &&
-	$$names[7] eq "COL_INTP2" );
-printf("%sok 21\n", (( $ok ) ? "" : "not "));
-
-$names = $st->{NAME_uc};
-$ok = ( 8 == @$names &&
-        $$names[0] eq "COL_CHAR" &&
-	$$names[1] eq "COL_VARCHAR" &&
-	$$names[2] eq "COL_INT" &&
-	$$names[3] eq "COL_FLOATING" &&
-	$$names[4] eq "COL_DATE" &&
-	$$names[5] eq "COL_DECIMAL" &&
-	$$names[6] eq "COL_QUAD" &&
-	$$names[7] eq "COL_INTP2" );
-printf("%sok 22\n", (( $ok ) ? "" : "not "));
-
-$names = $st->{NAME_lc};
-$ok = ( 8 == @$names &&
-        $$names[0] eq "col_char" &&
-	$$names[1] eq "col_varchar" &&
-	$$names[2] eq "col_int" &&
-	$$names[3] eq "col_floating" &&
-	$$names[4] eq "col_date" &&
-	$$names[5] eq "col_decimal" &&
-	$$names[6] eq "col_quad" &&
-	$$names[7] eq "col_intp2" );
-printf("%sok 23\n", (( $ok ) ? "" : "not "));
 
 #
-#  check the column name attribute
+#  INSERT/FETCH of CHAR with option "chop"
 #
-my $types = $st->{TYPE};
-#foreach my $type ( @$types ) {
-#    print "type: $type\n";
-#}
-$ok = ( 8 == @$types &&
-        $$types[0] == 453 && # CHAR
-	$$types[1] == 449 && # VARCHAR
-	$$types[2] == 497 && # INTEGER
-	$$types[3] == 481 && # FLOAT
-        $$types[4] == 503 && # DATE
-	$$types[5] == 497 && # DECIMAL(5) -> INTEGER
-	$$types[6] == 505 && # QUADWORD
-	$$types[7] == 497 ); # INTEGER
-printf("%sok 24\n", (( $ok ) ? "" : "not "));
+sub test_char_chopped {
+    my $vals = [
+	{ in => 'abcd' },
+	{ in => '123 ', out => '123' },
+	{ in => '54321', out => '5432' },
+	{ in => undef },
+	{ in => 87, out => '87' },
+	{ in => '' } ];
+
+    $dbh->{ChopBlanks} = 1;
+    my $chopped = $dbh->{ChopBlanks};
+    check ( $chopped, 'set ChopBlanks = 1', $DBI::errstr );
+
+    test_data_type( "CHAR(4)", 0, $vals );
+}
+
 
 #
-#  check the precsion attribute
+#  INSERT/FETCH of VARCHAR with (chop should affect VARCHAR at all,
+#  there was a bug about this)
 #
-my $precisions = $st->{PRECISION};
-#foreach my $prec ( @$precisions ) {
-#    print "prec: $prec\n";
-#}
-$ok = ( 8 == @$precisions &&
-        $$precisions[0] == 15 &&
-        $$precisions[1] == 30 &&
-        $$precisions[2] == 9 &&
-        $$precisions[3] == 17 && # double precision
-        $$precisions[4] == 17 && # default formt is "dd.mm.yyyy hh.mm.ss"
-				 # changes with date format choosen during
-				 # connect
-        $$precisions[5] == 9 &&  # DECIMAL(5) -> INTEGER, the (5) is NA
-        $$precisions[6] == 18 && # QUADWORD
-	$$precisions[7] == 9 );  # INTEGER
-printf("%sok 25\n", (( $ok ) ? "" : "not "));
+sub test_varchar_chopped {
+    my $vals = [
+	{ in => 'ABCdEFG' },
+	{ in => 'GULP' },
+	{ in => '123456789', out => '12345678' },
+	{ in => undef },
+	{ in => -101.12, out => '-101.12' },
+	{ in => '' } ];
+	
+    test_data_type( "VARCHAR(8)", 0, $vals  );
+}
+
+
 
 #
-#  check the scale attribute
+#  INSERT/FETCH of TINYINT, not checking for integer overflows
 #
-my $scales = $st->{SCALE};
-#foreach my $scale ( @$scales ) {
-#    print "scale: $scale\n";
-#}
-$ok = ( 8 == @$scales &&
-        !defined $$scales[0] && # CHAR
-	!defined $$scales[1] && # VARCHAR
-	$$scales[2] == 0 &&     # INTEGER
-	$$scales[3] == 0 &&     # FLOAT
-        !defined $$scales[4] && # DATE
-	$$scales[5] == 0 &&     # DECIMAL(5) -> INTEGER
-	$$scales[6] == 0 &&     # QUADWORD
-	$$scales[7] == 2 );     # INTEGER(2)
-printf("%sok 26\n", (( $ok ) ? "" : "not "));
+sub test_tinyint_unchecked {
+    my $vals = [
+	{ in => 1 },
+	{ in => 127 },
+	{ in => -128 },
+	{ in => 0 },
+	{ in => undef },
+	{ in => 128, out => -128 },
+	{ in => -129, out => 127 } ];
+
+    $dbh->{rdb_overflow_kills} = 0;
+    my $checked = $dbh->{rdb_overflow_kills};
+    check ( !$checked, 'set rdb_overflow_kills = 0', $DBI::errstr );
+
+    test_data_type( "TINYINT", 1, $vals );
+}
+
 
 #
-#  check the nullable attribute, to get it right one has to check 
-#  NOT NULL constraints, this is not implemented
+#  INSERT/FETCH of TINYINT, checking for integer overflows
 #
-my $nullables = $st->{NULLABLE};
-#foreach my $nullable ( @$nullables ) {
-#    print "nullable: $nullable\n";
-#}
-$ok = ( 8 == @$nullables &&
-	$$nullables[0] == 2 &&    # constraints are not checked, -> unknown
-	$$nullables[1] == 2 &&
-	$$nullables[2] == 2 &&
-	$$nullables[3] == 2 &&
-	$$nullables[4] == 2 &&
-	$$nullables[5] == 2 &&
-	$$nullables[6] == 2 &&
-	$$nullables[7] == 2 );
-printf("%sok 27\n", (( $ok ) ? "" : "not "));
+sub test_tinyint_checked {
+    my $vals = [
+	{ in => 1 },
+	{ in => 127 },
+	{ in => -128 },
+	{ in => 0 },
+	{ in => undef },
+	{ in => 128, expected_error => 1 },
+	{ in => -129, expected_error => 1 } ];
 
-#
-#  check the cursor name attribute
-#
-my $st_name = $st->{CursorName};
-#print "statement name: $st_name\n";
-$ok = ( $st_name =~ /^CUR_(\d+)$/ );
-printf("%sok 28\n", (( $ok ) ? "" : "not "));
+    $dbh->{rdb_overflow_kills} = 1;
+    my $checked = $dbh->{rdb_overflow_kills};
+    check ( $checked, 'set rdb_overflow_kills = 0', $DBI::errstr );
+
+    test_data_type( "TINYINT", 1, $vals );
+}
 
 #
-#  bind columns
+#  INSERT/FETCH of SMALLINT, not checking for integer overflows
 #
-my ( $col_char, $col_varchar, $col_int, $col_float, $col_date, $col_decimal,
-     $col_quad, $col_intp2 );
-$ok = $st->bind_columns ( \$col_char,
-			  \$col_varchar,
-			  \$col_int,
-			  \$col_float,
-			  \$col_date,
-			  \$col_decimal,
-			  \$col_quad,
-			  \$col_intp2 );
-printf("%sok 29\n", (( $st && !$DBI::errstr) ? "" : "not "));
+sub test_smallint_unchecked {
+    my $vals = [
+	{ in => 1 },
+	{ in => 32767 },
+	{ in => -32768 },
+	{ in => 0 },
+	{ in => undef },
+	{ in => 40000, out => -25536 } ];
 
-$ok = $st->execute;
-printf("%sok 30\n", (( $st && !$DBI::errstr) ? "" : "not "));
+    $dbh->{rdb_overflow_kills} = 0;
+    my $checked = $dbh->{rdb_overflow_kills};
+    check ( !$checked, 'set rdb_overflow_kills = 0', $DBI::errstr );
 
-#
-#  first fetch and compare
-#
-$ok = $st->fetch;
-printf("%sok 31\n", (( $st && !$DBI::errstr) ? "" : "not "));
-
-#print "col_char     $col_char\n";
-#print "col_varchar  $col_varchar\n";
-#print "col_int      $col_int    \n";
-#print "col_float    $col_float  \n";
-#print "col_date     $col_date   \n";
-#print "col_decimal  $col_decimal\n";
-#print "col_quad     $col_quad   \n";
-#print "col_intp2    $col_intp2  \n";
-
-$ok = ( $col_char eq $col_char_t1 &&
-        $col_varchar eq $col_varchar_t1 &&
-	$col_float == $col_float_t1 &&
-	$col_int == $col_int_t1 &&
-	$col_date =~ /^$col_date_t1/ &&
-	$col_decimal == $col_decimal_t1 &&
-	$col_quad eq $col_quad_t1 &&
-	$col_intp2 eq $col_intp2_t1 );
-printf("%sok 32\n", (( $ok ) ? "" : "not "));
+    test_data_type( "SMALLINT", 1, $vals );
+}
 
 #
-#  second fetch and compare
+#  INSERT/FETCH of SMALLYINT, checking for integer overflows
 #
-$ok = $st->fetch;
-printf("%sok 33\n", (( $st && !$DBI::errstr) ? "" : "not "));
+sub test_smallint_checked {
+    my $vals = [
+	{ in => 1 },
+	{ in => 32767 },
+	{ in => -32768 },
+	{ in => 0 },
+	{ in => undef },
+	{ in => 40000, expected_error => 1 } ];
 
-#print "col_char     $col_char\n";
-#print "col_varchar  $col_varchar\n";
-#print "col_int      $col_int    \n";
-#print "col_float    $col_float  \n";
-#print "col_date     $col_date   \n";
-#print "col_decimal  $col_decimal\n";
-#print "col_quad     $col_quad   \n";
-#print "col_intp2    $col_intp2  \n";
+    $dbh->{rdb_overflow_kills} = 1;
+    my $checked = $dbh->{rdb_overflow_kills};
+    check ( $checked, 'set rdb_overflow_kills = 0', $DBI::errstr );
 
-$ok = ( $col_char eq $col_char_t2 &&
-        $col_varchar eq $col_varchar_t2 &&
-	$col_float == $col_float_t2 &&
-	$col_int == $col_int_t2 &&
-	$col_date =~ /^$col_date_t2/ &&
-	$col_decimal == $col_decimal_t2 &&
-	$col_quad eq $col_quad_t2 &&
-	$col_intp2 eq $col_intp2_t2 );
-printf("%sok 34\n", (( $ok ) ? "" : "not "));
-
-$ok = $st->fetch;
-printf("%sok 35\n", (( !$ok && !$DBI::errstr ) ? "" : "not "));
-
-$ok = $dbh->commit;
-printf("%sok 36\n", (( $ok && !$DBI::errstr ) ? "" : "not "));
-
-$ok = $dbh->disconnect;
-printf("%sok 37\n", (( $ok && !$DBI::errstr ) ? "" : "not "));
+    test_data_type( "SMALLINT", 1, $vals );
+}
 
 #
-#  connect again with VMS standard date format
+#  INSERT/FETCH of INTEGER, not checking for integer overflows
 #
-$dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME TEST.RDB', undef, undef,
-                     { RaiseError => 1,
-	               PrintError => $print_error, 
-		       AutoCommit => 0,
-		       ChopBlanks => 1,
-		       rdb_dateformat => '|!DB-!MAAU-!Y4|!H04:!M0:!S0.!C2|' } );
-printf("%sok 38\n", ($dbh ? "" : "not "));
+sub test_integer_unchecked {
+    my $vals = [
+	{ in => 1 },
+	{ in => 123456789 },
+	{ in => -987654321 },
+	{ in => 0 },
+	{ in => undef },
+	{ in => 9876543210, out => 1286608618  } ];
+
+    $dbh->{rdb_overflow_kills} = 0;
+    my $checked = $dbh->{rdb_overflow_kills};
+    check ( !$checked, 'set rdb_overflow_kills = 0', $DBI::errstr );
+
+    test_data_type( "INTEGER", 1, $vals );
+}
 
 #
-#  check date conversion
+#  INSERT/FETCH of INTEGER, checking for integer overflows
 #
-eval {
-    $dbh->do( "set transaction read only" );
-    my $st = $dbh->prepare( "select col_date from dummy where " .
-			    "col_char = ?" );
-    $st->bind_columns( \$col_date );
-    $st->execute( $col_char_t1 );
-    $st->fetch;
-    $st->finish;
+sub test_integer_checked {
+    my $vals = [
+	{ in => 1 },
+	{ in => 123456789 },
+	{ in => -987654321 },
+	{ in => 0 },
+	{ in => undef },
+	{ in => 9876543210, expected_error => 1 } ];
+
+    $dbh->{rdb_overflow_kills} = 1;
+    my $checked = $dbh->{rdb_overflow_kills};
+    check ( $checked, 'set rdb_overflow_kills = 0', $DBI::errstr );
+
+    test_data_type( "INTEGER", 1, $vals );
+}
+
+#
+#  INSERT/FETCH of BIGINT, (fetched as string data)
+#
+sub test_bigint {
+    my $vals = [
+	{ in => 1 },
+	{ in => 123456789012345, out => '123456789012345' },
+	{ in => '-543210987654321' },
+	{ in => 0 },
+	{ in => undef } ];
+
+    test_data_type( "BIGINT", 0, $vals );
+}
+
+#
+#  INSERT/FETCH of scaled TINYINT (from now on integer overflows are
+#  checked)
+#
+sub test_tinyint_scaled {
+    my $vals = [
+	{ in => 1.10, out => '1.10' },
+	{ in => 1.27, out => '1.27' },
+	{ in => -1.28, out => '-1.28' },
+	{ in => 0, out => '0.00' },
+	{ in => undef },
+	{ in => 0.01, out => '0.01' },
+	{ in => -0.2, out => '-0.20' } ];
+
+    test_data_type( "TINYINT(2)", 1, $vals );
+}
+
+#
+#  INSERT/FETCH of scaled SMALLINT
+#
+sub test_smallint_scaled {
+    my $vals = [
+	{ in => 1.12, out => '1.120' },
+	{ in => 32.767, out => '32.767' },
+	{ in => -32.768, out => '-32.768' },
+	{ in => 0, out => '0.000' },
+	{ in => undef },
+	{ in => '0.03', out => '0.030' },
+	{ in => -0.004, out => '-0.004' } ];
+
+    test_data_type( "SMALLINT(3)", 1, $vals );
+}
+
+
+#
+#  INSERT/FETCH of scaled INTEGER
+#
+sub test_integer_scaled {
+    my $vals = [
+	{ in => 1, out => '1.00' },
+	{ in => 1234567.89, out => '1234567.89' },
+	{ in => -9876543.21, out => '-9876543.21' },
+	{ in => 0, out => '0.00' },
+	{ in => undef },
+	{ in => '+0.3', out => '0.30' },
+	{ in => -20, out => '-20.00' } ];
+
+    test_data_type( "INTEGER(2)", 1, $vals );
+}
+
+#
+#  INSERT/FETCH of DOUBLE
+#
+sub test_double {
+    my $vals = [
+	{ in => 1.1 },
+	{ in => -1.2345678901 },
+	{ in => -1.27E34 },
+	{ in => 0.000045 },
+	{ in => 1.12E-330 },
+	{ in => 0.012E-10 },
+	{ in => 123456789 },
+	{ in => -0.987E200 } ];
+
+    test_data_type( "FLOAT", 1, $vals );
+}
+
+#
+#  INSERT/FETCH of FLOAT(24), means it is stored as 4-byte FLOAT
+#  floating under- and overflow is checked always
+#
+sub test_float {
+    my $vals = [
+	{ in => 1.123 },
+	{ in => 32.767E30 },
+	{ in => -1.0001E-34 },
+	{ in => 1.1234E10 },
+	{ in => undef },
+	{ in => 0.000001 },
+	{ in => 1.12E45, expected_error => 1 },
+	{ in => -1.12E-45, expected_error => 1 },
+	{ in => 1.23456780, out => 1.234568 } ];
+
+    test_data_type( "FLOAT(24)", 1, $vals );
+}
+
+#
+#  INSERT/FETCH of DATE VMS 
+#
+sub test_date_1 {
+    my $vals = [
+	{ in => '1-JAN-1963 13:15', out => '1963.01.01 13:15:00.00' },
+	{ in => '15.OCT.2001', out => '2001.10.15 00:00:00.00' },
+	{ in => '13.DEC.2000 12:12:12.12', out => '2000.12.13 12:12:12.12' },
+	{ in => '01.07.1900 09:08:07.99', out => '1900.07.01 09:08:07.99' },
+	{ in => '09.07.63 12', out => '2063.07.09 12:00:00.00' },
+	{ in => '01-DEZ-2000', expected_error => 1 },
+	{ in => '29-FEB-1999', expected_error => 1 }
+    ];
+
+    my $format = "|!Y4.!MN0.!D0|!H04:!M0:!S0.!C2|";
+    $dbh->{rdb_dateformat} = $format;
+    my $date_format = $dbh->{rdb_dateformat};
+    check( $date_format eq $format, 'set dateformat', $format );
+
+    test_data_type( "DATE VMS", 0, $vals );
+}
+
+#
+#  INSERT/FETCH of DATE VMS, (SYS$LANGUAGE was set at the start)
+#
+sub test_date_2 {
+    my $vals = [
+	{ in => '1-JAN-1963 13:15', out => '19630101 1315000000000' },
+	{ in => '15.OCT.2001', out => '20011015 0000000000000' },
+	{ in => '13.DEC.2000 12:12:12.12', out => '20001213 1212121200000' },
+	{ in => '01.07.1900 09:08:07.99', out => '19000701 0908079900000' },
+	{ in => '09.07.63 12', out => '20630709 1200000000000' },
+	{ in => '20010909 1234567654321', out => '20010909 1234567654321' },
+    ];
+
+    my $format = "|!Y4!MN0!D0|!H04!M0!S0!C7|";
+    $dbh->{rdb_dateformat} = $format;
+    my $date_format = $dbh->{rdb_dateformat};
+    check( $date_format eq $format, 'set dateformat', $format );
+
+    test_data_type( "DATE VMS", 0, $vals );
+}
+
+
+#
+#  INSERT/FETCH of DATE INTERVAL (YEAR-MONTH)
+#
+sub test_interval_1 {
+    my $vals = [
+	{ in => '0000-11', out => ' 0000-11' },
+	{ in => '-12-0', out => '-0012-00' },
+	{ in => '1111-01', out => ' 1111-01' },
+	{ in => '-9998-13', out => '-9998-13', expected_error => 1 }, 
+	{ in => '12345-01', out => ' ****-01' }     # no exception !!!
+];
+
+    test_data_type( "INTERVAL YEAR(4) TO MONTH", 0, $vals );
+}
+
+
+#
+#  INSERT/FETCH of DATE INTERVAL (DAY TO SECOND)
+#
+sub test_interval_2 {
+    my $vals = [
+	{ in => '1:1:1:1', out => ' 000001:01:01:01' },
+	{ in => '11:11:11:11', out => ' 000011:11:11:11' },
+	{ in => '123456:23:59:59', out => ' 123456:23:59:59' },
+	{ in => '123456:24:59:59', out => ' 123456:24:59:59', 
+			expected_error => 1 },
+	{ in => '1234567:23:59:59', out => ' ******:23:59:59' },
+];
+
+    test_data_type( "INTERVAL DAY(6) TO SECOND(0)", 0, $vals );
+}
+
+
+#
+#  creating a table holding all kind of datatypes,
+#  check for statement handle info "Statement"
+#
+sub test_create_all_types {
+    #
+    #  start READ WRITE transaction
+    #
+    my $ok = $dbh->do('SET TRANSACTION READ WRITE');
+    check ( ( $ok == "0E0" || $DBI::errstr !~ /%SQL-F-BAD_TXN_STATE/ ),
+	    'do of SET TRANS READ WRITE', $DBI::errstr );
+
+    my $st_table = "CREATE TABLE my_all_types (";
+    my $col = 1;
+    foreach my $type ( @types ) {
+	$st_table .= "," if ( $col > 1 );
+	$st_table .= "Col$col $type->{sql_text}";
+	$col++;
+    }
+    $st_table .= ")";
+    $ok = $dbh->do( $st_table );
+    check ( $ok == "0E0", "create table with\n$st_table", $DBI::errstr );
+
+    $ok = $dbh->commit;
+    check( $ok, 'COMMIT', $DBI::errstr );
+
+    $ok = $dbh->do('SET TRANSACTION READ ONLY');
+    check( $ok == "0E0", 'do of SET TRANS READ ONLY', $DBI::errstr );
+
+    my $st_sel = "SELECT ";
+    my $col = 1;
+    foreach my $type ( @types ) {
+	$st_sel .= "," if ( $col > 1 );
+	$st_sel .= "Col$col";
+	$col++;
+    }
+    $st_sel .= " FROM my_all_types WHERE Col1 = ? and Col2 = ?";
+    $sth = $dbh->prepare( $st_sel );
+    check ( $sth, 'prepare of SELECT', $DBI::errstr );
+
+    my $st_text = $sth->{Statement};
+    check( $st_text eq $st_sel,
+	   'sth->{Statement}', $st_text, $st_sel );
+}
+
+#
+# check for sth_info NAME
+#
+sub test_NAME {
+
+    my $col = 1;
+    foreach my $name ( @{$sth->{NAME}} ) {
+	check ( $name eq uc("Col$col"), "sth->{NAME}", $name, "Col$col" );
+	$col++;
+    }
+}
+
+#
+# check for sth_info NAME_lc
+#
+sub test_NAME_lc {
+
+    my $col = 1;
+    foreach my $name ( @{$sth->{NAME_lc}} ) {
+	check( $name eq "col$col", "sth->{NAME_lc}", $name, "COL$col" );
+	$col++;
+    }
+}
+
+#
+# check for sth_info NAME_uc
+#
+sub test_NAME_uc {
+
+    my $col = 1;
+    foreach my $name ( @{$sth->{NAME_uc}} ) {
+	check ( $name eq "COL$col", "sth->{NAME_uc}", $name, "COL$col" );
+	$col++;
+    }
+}
+
+#
+# check for sth_info PRECISION
+#
+sub test_PRECISION {
+
+    my $col = 1;
+    foreach my $precision ( @{$sth->{PRECISION}} ) {
+	my $expected = $types[$col-1]->{precision};
+	my $sql_text = $types[$col-1]->{sql_text};
+	check ( $precision == $expected, 
+	        "sth->{PRECISION}, $sql_text", $precision, $expected );
+	$col++;
+    }
+}
+
+#
+# check for sth_info SCALE
+#
+sub test_SCALE {
+
+    my $col = 1;
+    foreach my $scale ( @{$sth->{SCALE}} ) {
+	my $expected = $types[$col-1]->{scale} || 0;
+	my $sql_text = $types[$col-1]->{sql_text};
+	check ( $scale == $expected,
+	        "sth->{SCALE}, $sql_text", $scale, $expected );
+	$col++;
+    }
+}
+
+#
+# check for sth_info TYPE
+#
+sub test_TYPE {
+
+    my $col = 1;
+    foreach my $type ( @{$sth->{TYPE}} ) {
+	my $expected = $types[$col-1]->{type};
+	my $sql_text = $types[$col-1]->{sql_text};
+	check ( $type eq $expected,
+	        "sth->{TYPE}, $sql_text", $type, $expected );
+	$col++;
+    }
+}
+
+#
+# check for sth_info NULLABLE (not available, so it is always 2)
+#
+sub test_NULLABLE {
+
+    my $col = 1;
+    foreach my $nullable ( @{$sth->{NULLABLE}} ) {
+	my $expected = 2;
+	my $sql_text = $types[$col-1]->{sql_text};
+	check ( $nullable == $expected,
+	        "sth->{NULLABLE}, $sql_text", $nullable, $expected );
+	$col++;
+    }
+}
+
+#
+# check for sth_info CursorName
+#
+sub test_CursorName {
+
+    my $cursor = $sth->{CursorName};
+    check ( $cursor =~ /^CUR_(\d+)$/, 'sth->{CursorName}', $cursor );
+}
+
+#
+# check for sth_info NUM_OF_FIELDS
+#
+sub test_NUM_OF_FIELDS {
+    
+    my $num_of_fields = $sth->{NUM_OF_FIELDS};
+    check( $num_of_fields == @types, 
+	   'sth->{NUM_OF_FIELDS}', $num_of_fields, scalar(@types) )
+}
+
+
+#
+# check for sth_info NUM_OF_PARAMS
+#
+sub test_NUM_OF_PARAMS {
+    
+    my $num_of_params = $sth->{NUM_OF_PARAMS};
+    check ( $num_of_params == 2, 'sth->{NUM_OF_PARAMS}', $num_of_params, 2 );
     $dbh->commit;
-};
-#print "err: $@, result: $col_date\n";
-$ok = ( !$@ && $col_date eq " 9-JUL-1963 00:00:00.00" );
-printf("%sok 39\n", ($ok ? "" : "not "));
+}
+
 
 #
-#  check NULL handling
+# test of rdb_hold attribute of a statement handle. This cursor
+# is kept open over commits
+# Additionally execute return codes are checked;
 #
-eval {
-    $dbh->do( "set transaction read write" );
-    my $sts = "update dummy set col_varchar = ?, col_int = ?, col_float = ?," .
-           "col_date = ?, col_decimal = ?, col_quad = ?, col_intp2 = ? " .
-	   "where col_char = ?";
-    my $st = $dbh->prepare( $sts );
-    $st->execute( undef, undef, undef, undef, undef, undef, undef,
-	          $col_char_t1 );
-    $st->finish;
-    $dbh->commit;
+sub test_hold_and_current_of {
 
-    $dbh->do( "set transaction read only" );
-    $st = $dbh->prepare( q/select col_varchar, col_int, col_float,
-                                  col_date, col_decimal, col_quad, col_intp2
-	                   from dummy where col_char = ?/ );
+    my $ok = $dbh->do( 'SET TRANSACTION READ WRITE' );
+    check( $ok == "0E0", "SET TRANS RW 1", $DBI::errstr );
 
-    $st->bind_columns ( \$col_varchar, \$col_int, \$col_float,\$col_date,
-		        \$col_decimal, \$col_quad, \$col_intp2 );
-    $st->execute( $col_char_t1 );
-    $st->fetch;
-    $st->finish;
-    $dbh->commit;
-};
-$ok = ( !$@ && 
-        !defined $col_varchar &&
-        !defined $col_int &&
-        !defined $col_float &&
-        !defined $col_date &&
-        !defined $col_decimal &&
-        !defined $col_quad &&
-        !defined $col_intp2 );
-printf("%sok 40\n", ($ok ? "" : "not "));
+    $ok = $dbh->do( 'CREATE TABLE hold_test ( id integer, val integer )' );
+    check( $ok == "0E0", "CREATE TABLE", $DBI::errstr );
 
-#
-#  checking $dbh->tables method
-#
-my @tables = $dbh->tables;
-#foreach my $table ( @tables ) {
-#    print "table $table\n";
-#}
-$ok = ( !$DBI::errstr && @tables == 1 && $tables[0] eq "DUMMY" );
-printf("%sok 41\n", ($ok ? "" : "not "));
+    my $st_ins = $dbh->prepare( 'INSERT INTO hold_test VALUES(?,?)' );
+    check( $st_ins, "PREPARE insert", $DBI::errstr );
 
-#
-#  insert 50% NULL and 50% NOT NULL columns to test for a special bug
-#  occured for multiple inserts
-#
-my $count;
-eval {
-    $dbh->do( "set transaction read write" );
-    $dbh->{rdb_dateformat} = q/|!Y4!MN0!D0|!H04!M0!S0!C2|/;
-    $st = $dbh->prepare( q/insert into dummy ( col_char, col_varchar, 
-				col_int, col_float, col_date, col_decimal, 
-				col_quad, col_intp2 )
-		           values( ?, ?, ?, ?, ?, ?, ?, ? ) / );
-    for ( 1 .. 100 ) { 
-	if ( $_ % 2 ) {
-	    $st->execute( 'test_null', $col_varchar_t2, $col_int_t2,
-                          $col_float_t2, $col_date_t2, $col_decimal_t2,
-			  $col_quad_t2, $col_intp2_t2 );
-	} else {
-	    $st->execute( 'test_null', undef, undef,
-			  undef, undef, undef,
-			  undef, undef );
+    foreach my $i ( 1..100 ) {
+	$ok = $st_ins->execute( $i, $i );
+	check( $ok == 1, "INSERT", $i, $ok, $DBI::errstr );
+    }
+    $ok = $dbh->commit;
+    check( $ok, "COMMIT 1", $DBI::errstr );
+
+    $ok = $dbh->do( 'SET TRANSACTION READ WRITE' );
+    check( $ok == "0E0", "SET TRANS RW 2", $DBI::errstr );
+
+    my $st_sel = $dbh->prepare( 'SELECT id, val FROM hold_test',
+		                { rdb_hold => 1 } );
+    check( $st_sel, 'PREPARE select with hold', $DBI::errstr );     
+
+    my $st_upd = $dbh->prepare( 'UPDATE hold_test SET val = NULL ' .
+                                'WHERE CURRENT OF '. 
+				$st_sel->{CursorName} );
+    check( $st_upd, 'PREPARE update', $DBI::errstr );     
+
+    $ok = $st_sel->execute;
+    check( $ok == -1, "EXECUTE select", $DBI::errstr );
+    my ( $id, $val );
+    $ok = $st_sel->bind_columns( \$id, \$val );
+    check( $ok, "bind params", $DBI::errstr );
+
+    while ( $st_sel->fetch ) {
+	if ( $val % 2 ) {
+	    $ok = $st_upd->execute;
+	    check( $ok == 1, "UPDATE", $DBI::errstr );
+	    $ok = $dbh->commit;
+	    check( $ok, "COMMIT 2", $DBI::errstr );
+	    $ok = $dbh->do( "SET TRANSACTION READ WRITE" );
+	    check( $ok == "0E0", "SET TRANS RW 3", $DBI::errstr );
 	}
     }
-    $st->finish;
-    $dbh->commit;
-    $dbh->do( "set transaction read only" );
-    $count = $dbh->selectrow_array( "select count(*) from dummy " .
-	  			    "where col_varchar is not null " .
-				    "and col_char = 'test_null'" );
-    $dbh->commit;
-};
-$ok = ( !$@ && $count == 50 );
-printf("%sok 42\n", ($ok ? "" : "not "));
+
+    my $count = $dbh->selectrow_array( "SELECT COUNT(*) FROM hold_test " .
+                                       "WHERE val IS NULL" );
+    check( $count == 50, "unexpected number of NULL rows", $count,
+	   $DBI::errstr );
+
+    $ok = $dbh->do( "UPDATE hold_test SET VAL = ID" );
+    check( $ok == 100, "unexpected number of rows affected in do UPDATE",
+           $ok, $DBI::errstr );
+
+    $ok = $dbh->commit;
+    check( $ok, "COMMIT", $DBI::errstr );
+}    
+
+sub test_bind {
+
+    my $ok = $dbh->do( "SET TRANSACTION READ WRITE" );
+    check( $ok == "0E0", "SET TRANS RW", $DBI::errstr );
+
+    $ok = $dbh->do( "CREATE MODULE test_module_1 LANGUAGE SQL " .
+                    "PROCEDURE proc_a( IN :a integer, IN :b integer, " .
+		    "                  OUT :c integer, OUT :d char(5) ); " .
+		    "  BEGIN " .
+		    "   SET :c = :a + :b; " .
+		    "   SET :d = 'Gulp'; " .
+		    "  END; " .
+		    "END MODULE" );
+    check( $ok == "0E0", "CREATE MODULE", $DBI::errstr );
+
+    my $st_call = $dbh->prepare( "CALL proc_a( ?, ?, ?, ?)" );
+    check( $st_call, "PREPARE call", $DBI::errstr );
+
+    my ( $b, $c, $d );
+    $ok = $st_call->bind_param( 1, 10 );
+    check( $ok, "bind_param 1", $DBI::errstr );
+
+    $ok = $st_call->bind_param_inout( 2, \$b, 0 );
+    check( $ok, "bind_param 2", $DBI::errstr );
+
+    $ok = $st_call->bind_param_inout( 3, \$c, 0 );
+    check( $ok, "bind_param 3", $DBI::errstr );
+
+    $ok = $st_call->bind_param_inout( 4, \$d, 0 );
+    check( $ok, "bind_param 4", $DBI::errstr );
+
+    $b = 32;
+    $ok = $st_call->execute;
+    check( $ok == "0E0", "execute of CALL", $DBI::errstr );
+
+    check( $c == 42, "output par 3 <> 42", $c );
+    check( $d eq "Gulp", "output par 4 <> Gulp", $d );
+
+    $ok = $dbh->commit;
+    check( $ok, "COMMIT", $DBI::errstr );
+}    
 
 #
-#  check HOLD cursor which endures a commit
+#  bind using SQL-names of parameters (or fields)
+#  additionally correct REF-counting of bound SVs is checked
 #
-eval {
-    $dbh->do( "set transaction read write" );
-    my $st1 = $dbh->prepare( "select col_date from dummy where " .
-			     "col_char = 'test_null'", { rdb_hold => 1 } );
-    my $st2 = $dbh->prepare( "update dummy set col_varchar = 'gulp' " .
-			     "where current of $st1->{CursorName}" );
-    $st1->execute;
-    while ( $st1->fetch ) {
-	$st2->execute;
-	$st2->finish;
-	$dbh->commit;
-	$dbh->do( "set transaction read write" );
+sub test_bind_by_name {
+    my $ok = $dbh->do( "SET TRANSACTION READ WRITE" );
+    check( $ok == "0E0", "SET TRANS RW", $DBI::errstr );
+
+    $ok = $dbh->do( "CREATE MODULE test_module_2 LANGUAGE SQL " .
+                    "PROCEDURE proc_b( OUT :a integer, INOUT :b integer, " .
+		    "                  IN :c char(5),  INOUT :parD char(10) ); " .
+		    "  BEGIN " .
+		    "   SET :b = :b + 10; " .
+		    "   SET :a = :b + 123; " .
+		    "   SET :parD = :c || :parD; " .
+		    "  END; " .
+		    "END MODULE" );
+    check( $ok == "0E0", "CREATE MODULE", $DBI::errstr );
+
+    my ( $a, $b, $c, $d );
+    {
+	my $st_call = $dbh->prepare( "CALL proc_b( ?, ?, ?, ?)" );
+	check( $st_call, "PREPARE call", $DBI::errstr );
+
+	$ok = $st_call->bind_param_inout( "A", \$a, 0 );
+	check( $ok, "bind_param a", $DBI::errstr );
+	check( SvREFCNT($a) == 2, "REFCNT of a <> 2", SvREFCNT($a) );
+
+	$ok = $st_call->bind_param_inout( "B", \$b, 0 );
+	check( $ok, "bind_param b", $DBI::errstr );
+	check( SvREFCNT($b) == 3, "REFCNT of b <> 3", SvREFCNT($b) );
+
+	$ok = $st_call->bind_param_inout( "C", \$c, 0 );
+	check( $ok, "bind_param c", $DBI::errstr );
+	check( SvREFCNT($c) == 2, "REFCNT of c <> 2", SvREFCNT($c) );
+
+	$ok = $st_call->bind_param_inout( "PARD", \$d, 0 );
+	check( $ok, "bind_param pard", $DBI::errstr );
+	check( SvREFCNT($d) == 3, "REFCNT of d <> 3", SvREFCNT($d) );
+
+	$b = 32;
+	$c = 'abcde';
+	$d = 'fghij';
+	$ok = $st_call->execute;
+	check( $ok == "0E0", "execute of CALL", $DBI::errstr );
+
+	check( $a == 165, "output par a <> 165", $a );
+	check( $b == 42, "output par b <> 42", $b );
+	check( $d eq "abcdefghij", "output par parD <> abcdefghij", $d );
     }
-    $dbh->commit;
-    $dbh->do( "set transaction read only" );
-    $count = $dbh->selectrow_array( "select count(*) from dummy " .
-	  			    "where col_varchar = 'gulp' " .
-				    "and col_char = 'test_null'" );
-    $dbh->commit;
-};		
-$ok = ( !$@ && $count == 100 );
-printf("%sok 43\n", ($ok ? "" : "not "));
+    check( SvREFCNT($a) == 1, "REFCNT of a <> 1 after destroy", SvREFCNT($a) );
+    check( SvREFCNT($b) == 1, "REFCNT of b <> 1 after destroy", SvREFCNT($b) );
+    check( SvREFCNT($c) == 1, "REFCNT of c <> 1 after destroy", SvREFCNT($c) );
+    check( SvREFCNT($d) == 1, "REFCNT of d <> 1 after destroy", SvREFCNT($d) );
 
+    $ok = $dbh->commit;
+    check( $ok, "COMMIT", $DBI::errstr );
+
+}    
+		    
+sub test_get_info {
+    my $ok = $dbh->get_info(17);
+    check( $ok eq "Oracle RDB", "get_info(17) = $ok", $DBI::errstr );
+    $ok = $dbh->get_info(18);
+    check( scalar($ok =~ /^(\d+)\.(\d+)/), "get_info(18) = $ok", $DBI::errstr );
+}    
+
+
+###################### INTERNAL SUBROUTINES ##########################
 
 #
-#  checking the complex $dbh->do using bind_values which is not using
-#  the driver internal exec immediate (like all dos before)
+#  signal error out of a test routine
 #
-eval {
-    $dbh->do( "set transaction read write" );
-    $dbh->do( "delete from dummy where col_varchar = ?", undef, 'gulp' );
-    $dbh->commit;
+sub check {
+    my ( $ok, @info ) = @_;
 
-    $dbh->do( "set transaction read only" );
-    $count =  $dbh->selectrow_array( 
-	"select count(*) from dummy where col_varchar = ?", undef, 'gulp' );
+    return if $ok;
+    my $text = join "\n", @info;
+    die $text;
+}
+
+#
+#  subroutine to make a INSERT/FETCH test for a given "data_type"
+#  the comparison use "is_numeric" for the comparison operator
+#
+sub test_data_type {
+    my ( $data_type, $is_numeric, $vals ) = @_;
+
+    my ( $ok, $row, $caller, $table );
+
+    $caller = (caller(1))[3];
+    ($table) = $caller =~ /([\w_\d]*)$/;
+
+    #
+    #  start READ WRITE transaction
+    #
+    $ok = $dbh->do('SET TRANSACTION READ WRITE');
+    check ( ( $ok == "0E0" || $DBI::errstr =~ /%SQL-F-BAD_TXN_STATE/ ),
+	    'do of SET TRANS READ WRITE', $DBI::errstr );
+
+    #
+    #  construct CREATE TABLE statement
+    #
+    my $cre_table = "CREATE TABLE $table (ID INTEGER, VAL $data_type)";
+    #
+    #  execute CREATE TABLE statement
+    #
+    $ok = $dbh->do($cre_table);
+    check( $ok == "0E0", "create table with\n$cre_table", $DBI::errstr );
+
+    #
+    #  construct INSERT INTO statement
+    #
+    my $ins_table = "INSERT INTO $table (ID,VAL) VALUES(?,?)";
     
-    $dbh->commit;
-};
-$ok = ( !$@ && $count == 0 );
-printf("%sok 44\n", ($ok ? "" : "not "));
+    #
+    #  prepare INSERT statement
+    #
+    my $st_ins = $dbh->prepare( $ins_table );
+    check( $st_ins, 'INSERT statement prepare', $DBI::errstr );
 
-#
-#  insert with error intended
-#
-$dbh->disconnect;
-$dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME TEST.RDB', undef, undef,
-                     { RaiseError => 0,
-	               PrintError => 0, 
-		       AutoCommit => 0,
-		       ChopBlanks => 1 } );
-$ok = $dbh->do( "insert into dummy ( col_xx) values ( 88 )" );
-printf("%sok 45\n", ($ok ? "not " : ""));
+    #
+    #  execute INSERT assuming that every column's "values" array has the
+    #  same length
+    #
+    $row = 0;
+    foreach my $val ( @$vals ) {
+	$row++;
+	$ok = $st_ins->execute( $row, $val->{in} );
+	#
+	#  check both:
+	#  1) error AND expected success
+	#  2) success AND expected error
+	#
+	if ( $ok != 1 && !$val->{expected_error} ) {
+	    $dbh->commit;
+	    check( 0, "INSERT execute (row $row)", 'unexpected error',
+	           $DBI::errstr );
+	}
+	if ( $ok && $val->{expected_error} ) {
+	    $dbh->commit;
+	    check( 0, "INSERT execute (row $row)", 'unexpected success' );
+	}
+    }
+    #
+    #  finish the INSERT
+    #
+    $ok = $st_ins->finish;	
+    check ( $ok, 'INSERT statement finish', $DBI::errstr );
+    
+    #
+    #  commit the CREATE TABLE and INSERT operations
+    #
+    $ok = $dbh->commit;
+    check ( $ok, 'commit', $DBI::errstr );
 
 
-$dbh->disconnect;
+    #
+    #  the fetching will run in READ ONLY mode
+    #
+    $ok = $dbh->do('SET TRANSACTION READ ONLY');
+    check( $ok == "0E0", 'do of SET TRANS READ ONLY before fetch',
+	   $DBI::errstr );
+
+    #
+    #  construct a SELECT
+    #
+    my $select = "SELECT ID, VAL FROM $table ORDER BY ID ASC";
+    my $st_sel = $dbh->prepare( $select );
+    check( $st_sel, 'SELECT statement prepare', $DBI::errstr );
+
+    #
+    #  execute the SELECT
+    #
+    $ok = $st_sel->execute;
+    check( $ok == -1, 'SELECT statement execute', $DBI::errstr );
+
+    #
+    #  FETCH all the rows and compare with expected results
+    #
+    $row = 0;
+    foreach my $val ( @$vals ) {
+	$row++;
+	next if $val->{expected_error};
+	my $p_values = $st_sel->fetch;
+
+	$val->{out} = $val->{in} if !exists $val->{out};
+
+	if ( defined $val->{out} ) {
+	    if ( $is_numeric && $val->{out} != $$p_values[1] ||
+	         !$is_numeric && $val->{out} ne $$p_values[1] ) {
+		$dbh->commit;
+		check( 0, 
+			 "compare fetched values at row $row",
+			 "expected: |$val->{out}|",
+			 "fetched: |$$p_values[1]|" );
+	    }
+	} elsif ( defined $$p_values[1] ) {
+		$dbh->commit;
+		check( 0,
+			"compare fetched values at row $row",
+			"expected: ||)",
+			"fetched: $$p_values[1]" );
+	}
+
+	if ( $$p_values[0] != $row ) {
+	    $dbh->commit;
+	    check( 0, "ID check on row $row", $$p_values[0] );
+	}
+
+    }
+    $ok = $st_sel->fetch;
+    check ( !$ok, 'check end of cursor signalling' );
+
+    $ok = $st_sel->finish;
+    check ( $ok, 'finish', $DBI::errstr );
+
+    $ok = $dbh->commit;
+    check( $ok, 'COMMIT after fetching', $DBI::errstr );
+}
 

@@ -9,7 +9,7 @@ BEFORE BUILDING, TESTING AND INSTALLING this you will need to:
 
     1) Install Oracle RDB with development option (SQLMOD is needed),
        since i don't know if it legally OK to distribute object modules.
-    2) Install the DBI module (I tested with DBI 1.14)
+    2) Install the DBI module (I tested with DBI 1.23)
 
 BUILDING
 
