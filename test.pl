@@ -528,28 +528,17 @@ $ok = ( !$@ && $count == 0 );
 printf("%sok 44\n", ($ok ? "" : "not "));
 
 #
-#  check for regression of the following bug:
-#  ChopBlanks off and reading a numeric column with precision returns
-#  the number as string but with trailing blanks. String is OK, but trailing
-#  blanks not !
+#  insert with error intended
 #
-$dbh->{ChopBlanks} = 0;
-eval {
-    $dbh->do( "set transaction read only" );
-    ($col_char,$col_intp2) =  $dbh->selectrow_array( 
-	"select col_char,col_intp2 from dummy where col_char = '$col_char_t2'",
-                                            undef );
-		# see line 138 and below    
-    $dbh->commit;
-};
-#print "|$col_char|$col_intp2|\n";
-$ok = ( !$@ && $col_intp2 eq $col_intp2_t2 && 
-        length($col_char) == 15 && $col_char =~ /^$col_char_t2 \s+$/x );
-printf("%sok 45\n", ($ok ? "" : "not "));
+$dbh->disconnect;
+$dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME TEST.RDB', undef, undef,
+                     { RaiseError => 0,
+	               PrintError => 0, 
+		       AutoCommit => 0,
+		       ChopBlanks => 1 } );
+$ok = $dbh->do( "insert into dummy ( col_xx) values ( 88 )" );
+printf("%sok 45\n", ($ok ? "not " : ""));
+
 
 $dbh->disconnect;
-
-
-
-
 

@@ -1,3 +1,10 @@
+Version 1.15
+
+Bugs fixed:
+	1) 'Statement' attribute of statement handle is now handled by DBI
+           and not from driver 
+        2) Makefile defines LNK$LIBRARY to use SYS$LIBRARY:SQL$USER.OLB
+
 Version 1.14
 
 Bugs fixed:

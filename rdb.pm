@@ -15,7 +15,7 @@ use Exporter ();
 
 @ISA = qw(DynaLoader Exporter);
 
-$VERSION = 1.14;
+$VERSION = 1.15;
 $ABSTRACT = "RDB driver for DBI";
 
 use strict;
@@ -74,7 +74,7 @@ sub prepare {
     my ( $dbh, $statement, $attribs ) = @_;
 
     # create a 'blank' sth
-    my $sth = DBI::_new_sth($dbh, {} );
+    my $sth = DBI::_new_sth($dbh, {'Statement' => $statement} );
     DBD::RDB::st::_prepare( $sth, $statement, $attribs ) or return undef;
     $sth;
 }

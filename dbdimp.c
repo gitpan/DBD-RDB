@@ -233,7 +233,7 @@ int rdb_db_do( SV *dbh, imp_dbh_t *imp_dbh, char *statement )
     long status, count;
     struct {
 	short len;
-	char buf[2000];
+	char buf[2002];
     } var_stmt;
 
     if ( !rdb_set_connection( imp_dbh ) ) return 0;
@@ -243,13 +243,13 @@ int rdb_db_do( SV *dbh, imp_dbh_t *imp_dbh, char *statement )
     DBDSQL_DO( &status, &var_stmt );
     if ( status && status != 100 ) {
 	do_error( dbh, status, 0 );
-	return -2;
+	return 0;
     } 
     if ( DBIc_is(imp_dbh,DBIcf_AutoCommit) ) {
 	DBDSQL_COMMIT( &status );
 	if ( status && status != SQLCODE_NOIMPTXN ) {
 	    do_error( dbh, status, 0 );
-	    return -2;
+	    return 0;
 	}
     }
     return -1;
@@ -407,13 +407,17 @@ int rdb_st_prepare( SV *sth, imp_sth_t *imp_sth, char *statement, SV *pattribs)
 {
     long status;
     int len;
-    sql_t_varchar_w *var_stmt;
     sql_t_sqlda2 *in_sqlda  = (sql_t_sqlda2 *)0;
     sql_t_sqlda2 *out_sqlda = (sql_t_sqlda2 *)0;
     sql_t_sqlca sqlca;
     D_imp_dbh_from_sth;
     HV *attribs;
     SV **pvalue;
+    struct {
+	short len;
+	char buf[2002];
+    } var_stmt;
+
 
     if ( !rdb_set_connection( imp_dbh ) ) return 0;
 
@@ -429,11 +433,8 @@ int rdb_st_prepare( SV *sth, imp_sth_t *imp_sth, char *statement, SV *pattribs)
 
     len = strlen(statement);
     if ( len > 2000 ) len = 2000;
-    var_stmt = (sql_t_varchar_w *) malloc( len + sizeof(sql_t_varchar) );
-    strncpy( var_stmt->buf, statement, len );
-    var_stmt->buf[len] = 0;
-    var_stmt->len = len;
-    imp_sth->stmt = var_stmt;
+    strncpy( var_stmt.buf, statement, len );
+    var_stmt.len = len;
 
     if ( pattribs && SvROK(pattribs) && SvTYPE( SvRV(pattribs) ) ) {
 	attribs = (HV *)SvRV(pattribs);
@@ -449,7 +450,7 @@ int rdb_st_prepare( SV *sth, imp_sth_t *imp_sth, char *statement, SV *pattribs)
 
     sprintf( imp_sth->stmt_name, "STM_%d", imp_dbh->statement_nr++ );
 
-    DBDSQL_PREPARE( &status, imp_sth->stmt, imp_sth->stmt_name );
+    DBDSQL_PREPARE( &status, &var_stmt, imp_sth->stmt_name );
     if ( status ) {
 	do_error( sth, status, 0 );
 	return 0;
@@ -541,14 +542,21 @@ int rdb_st_execute( SV *sth, imp_sth_t *imp_sth )
 	DBDSQL_OPEN_CURSOR( &status, imp_sth->cur_name, imp_sth->in_sqlda );
 	if ( status ) {
 	    do_error( sth, status, 0 );
-	    return -2;
+	    return 0;
 	}
     } else {
 	if ( dbis->debug >= 4 ) print_sqlda( imp_sth->in_sqlda );
 	DBDSQL_EXECUTE( &status, imp_sth->stmt_name, imp_sth->in_sqlda );
 	if ( status ) {
 	    do_error( sth, status, 0 );
-	    return -2;
+	    return 0;
+	}
+	if ( DBIc_is(imp_dbh,DBIcf_AutoCommit) ) {
+	    DBDSQL_COMMIT( &status );
+	    if ( status && status != SQLCODE_NOIMPTXN ) {
+		do_error( sth, status, 0 );
+		return 0;
+	    }
 	}
     }    
     DBIc_ACTIVE_on(imp_sth);
@@ -562,12 +570,11 @@ void rdb_st_destroy( SV *sth, imp_sth_t *imp_sth )
     int i;
 
     if ( imp_sth ) {
-	if ( imp_sth->stmt ) {
+	if ( imp_sth->stmt_name ) {
 	    DBDSQL_RELEASE( &status, (char *)imp_sth->stmt_name );
 	    if ( status ) {
 		do_error( sth, status, 0 );
 	    }
-	    free( imp_sth->stmt );
 	}
 	if ( imp_sth->in_sqlda ) 
 	    free_sqlda( imp_sth->in_sqlda );
@@ -640,7 +647,7 @@ AV *dbd_st_fetch( SV *sth, imp_sth_t *imp_sth )
     chop_blanks = DBIc_is( imp_sth, DBIcf_ChopBlanks );
 
     if ( dbis->debug >= 4 ) {
-	fprintf( DBILOGFP, "%s %s\n", imp_sth->stmt_name, imp_sth->stmt->buf );
+	fprintf( DBILOGFP, "%s\n", imp_sth->stmt_name );
 	fprintf( DBILOGFP, "cursor %s\n", imp_sth->cur_name );
 	print_sqlda( imp_sth->out_sqlda );
     }
@@ -754,8 +761,6 @@ SV* rdb_st_FETCH_attrib( SV *sth, imp_sth_t *imp_sth,
     key = SvPV(keysv,len);
     if ( !strcmp( key, "CursorName" ) && imp_sth->cur_name[0] ) {
 	val = sv_2mortal( newSVpv( imp_sth->cur_name, 0 ) );
-    } else if ( !strcmp( key, "Statement" ) && imp_sth->stmt->len ) {
-	val = sv_2mortal( newSVpv( imp_sth->stmt->buf, 0 ) );
     } else if ( !strcmp( key, "NUM_OF_FIELDS" ) ) {
 	val = sv_2mortal( newSViv( DBIc_NUM_FIELDS(imp_sth) ) );
     } else if ( !strcmp( key, "NUM_OF_PARAMS" ) ) {

@@ -29,6 +29,9 @@ package MY;
 sub postamble {
 DBI::DBD::dbd_postamble().
 "
+.FIRST
+      define lnk\$library sys\$library:sql\$user.olb
+
 .SUFFIXES .sqlmod
 
 .sqlmod.obj :
