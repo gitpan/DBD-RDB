@@ -7,7 +7,9 @@ distribution rights.
 
 BEFORE BUILDING, TESTING AND INSTALLING this you will need to:
 
-    Install the DBI module (I tested with DBI 1.14)
+    1) Install Oracle RDB with development option (SQLMOD is needed),
+       since i don't know if it legally OK to distribute object modules.
+    2) Install the DBI module (I tested with DBI 1.14)
 
 BUILDING
 

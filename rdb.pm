@@ -15,7 +15,7 @@ use Exporter ();
 
 @ISA = qw(DynaLoader Exporter);
 
-$VERSION = 1.13;
+$VERSION = 1.14;
 $ABSTRACT = "RDB driver for DBI";
 
 use strict;
@@ -186,6 +186,33 @@ An example with a second alias inside the same connection is
 
 Multiple connects (i.e. multiple $dbh's) are supported using the 
 SET CONNECT inside the DBD.
+
+=head2 Datatype mapping
+
+The driver tries to keep as much datatypes unchanged as possible. The
+first exception are numeric columns with a precision. They are represented in
+perl as strings, e.g. "1.12" is a INTEGER(2) inside perl. This can lead
+to rounding problems especially in currency arithmetic. 
+
+The second exception are date/time columns. They are respresented as strings
+inside perl. The format is specified as a database handle attribute.
+
+  $dbh->{rdb_dateformat} = '|!DB-!MAAU-!Y4|!H04:!M0:!S0.!C2|'
+
+This is the VMS standard date format. Normally the attribute is used in
+the connect statement. Every format the LIBRTL routines can take is allowed.
+The default used in the connect is '|!Y4!MN0!D0|!H04!M0!S0!C2|'.
+
+=head2 RDB specific extensions to DBI/DBD functionality
+
+The first is the date/time format handling (see above). The second is
+the possibility to open a CURSOR WITH HOLD. This option keeps
+the cursor open even after a commit. This option is applied during a
+prepare like
+
+  $st = $dbh->prepare( "select column1 from table where " .
+		       "       column2 > 10",
+                       { rdb_hold => 1 } );
 
 =head1 Caveats
 
