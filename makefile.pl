@@ -10,13 +10,10 @@ my %opts =
     ('NAME' => 'DBD::RDB',
      'AUTHOR' => 'Andreas Stiller (andreas.stiller@eds.com)',
      'VERSION_FROM' => 'RDB.pm',
-     'INC' => 'PERL_ROOT:[LIB.DBI]',
+     'INC' => 'perl_root:[lib.site_perl.VMS_AXP.auto.dbi]',
      'XS' => 'rdb.xs',
      'C' => 'dbdimp.c',
      'OBJECT' => 'rdb.obj dbdimp.obj dbdsql.obj',
-     'dist'         => { 'SUFFIX'       => ".gz",
-			 'DIST_DEFAULT' => 'all tardist',
-			 'COMPRESS'     => "gzip -9vf" }
      );
 
 

@@ -63,7 +63,7 @@ procedure dbdsql_do
     :statement varchar(2000);
 
     execute immediate :statement;
-
+ 
 procedure dbdsql_execute
     sqlcode,
     :stmt_name char(15),

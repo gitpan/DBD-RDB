@@ -15,7 +15,7 @@ use Exporter ();
 
 @ISA = qw(DynaLoader Exporter);
 
-$VERSION = 1.0;
+$VERSION = 1.1;
 $ABSTRACT = "RDB driver for DBI";
 
 use strict;
@@ -36,7 +36,7 @@ $sqlstate = "";       # holds SQL state for    DBI::state
     # not a 'my' since we use it above to prevent multiple drivers
     $drh = DBI::_new_drh($class, {
       'Name'    => 'File',
-      'Version' => '1.0',
+      'Version' => '1.1',
       'Err'     => \$DBD::File::err,
       'Errstr'  => \$DBD::File::errstr,
       'State'   => \$DBD::File::state,
@@ -66,6 +66,31 @@ sub connect {
     $dbh;
 }
 
+
+package DBD::RDB::db; # ====== DATABASE ======
+use strict;
+
+sub prepare {
+    my ( $dbh, $statement, $attribs ) = @_;
+
+    # create a 'blank' sth
+    my $sth = DBI::_new_sth($dbh, {} );
+    DBD::RDB::st::_prepare( $sth, $statement, $attribs ) or return undef;
+    $sth;
+}
+
+sub do {
+    my ( $dbh, $statement, $attr, @bind_values ) = @_;
+    
+    if ( $attr || @bind_values ) {
+	my $sth = $dbh->prepare( $statement, $attr ) or return undef;
+        $sth->execute( @bind_values );
+    } else {
+        DBD::RDB::db::_do( $dbh, $statement );
+    }
+}
+
+
 sub tables {
     my ( $dbh ) = @_;
 
@@ -73,6 +98,9 @@ sub tables {
     my ( $table, $sth, $catalog, $schema );
 
     local $dbh->{RaiseError} = 0;
+    local $dbh->{PrintError} = 0;
+
+    my $started = $dbh->do( "set transaction read only" );
     $sth = $dbh->prepare( q/
 	select s2.rdb$catalog_schema_name,
 	       s1.rdb$catalog_schema_name,
@@ -85,32 +113,34 @@ sub tables {
 	   and r.rdb$relation_name = s.rdb$stored_name
 	   and s.rdb$schema_id = s1.rdb$catalog_schema_id
 	   and s1.rdb$parent_id = s2.rdb$catalog_schema_id / );
-    if ( not $sth ) {
+
+
+    if ( $sth ) {
+	$sth->bind_columns( \$catalog, \$schema, \$table );
+	$sth->execute;
+	while ( $sth->fetch ) {
+	    push @tables, "$catalog.$schema.$table";
+	}
+        $sth->finish;
+    } else {
         $sth = $dbh->prepare( q/
-                  select "","",rdb$relation_name
+                  select rdb$relation_name
                     from rdb$relations
                    where rdb$system_flag = 0 / );
+	if ( $sth ) {
+	    $sth->bind_columns( \$table );
+	    $sth->execute;
+	    while ( $sth->fetch ) {
+	        push @tables, $table;
+	    }
+            $sth->finish;
+	} else {
+	    die $sth->errstr if not $sth;
+	}
     }
-    die $sth->errstr if not $sth;
-
-    $sth->bind_columns( \$catalog, \$schema, \$table );
+    $dbh->commit if $started;
+    return @tables;
 }    
-
-
-package DBD::RDB::db; # ====== DATABASE ======
-use strict;
-
-sub prepare {
-    my($dbh, $statement, $attribs)= @_;
-
-    # create a 'blank' sth
-    my $sth = DBI::_new_sth($dbh, {
-        'Statement' => $statement,
-    });
-
-    DBD::RDB::st::_prepare( $sth, $statement, $attribs ) or return undef;
-    $sth;
-}
 
 1;
 

@@ -1,4 +1,5 @@
 MANIFEST
+CHANGES         changes since last version
 Makefile.PL	The Makefile generator
 TODO
 README
@@ -9,4 +10,4 @@ DBDSQL.SQLMOD   the actual SQL-code using the SQLMOD language
 RDB.H           include for RDB.XS 
 RDB.PM          the actual module calling routines in DBDIMP via RDB.XSI and RDB.XS
 RDB.XS          the "real" XS is RDB.XSI which itself is created during make
-TEST.PL         not yet in standard perl test format
+TEST.PL         some tests, not comlpete yet

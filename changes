@@ -1,0 +1,21 @@
+Version 1.1
+  
+new:
+	1) attribute {DateFormat} during connect taking lib$dt_xxx format
+           which gives the input and output format for this connect
+        2) statement attributes (hopefully) supported as described in
+	   "Programming the perl DBI"
+	
+bugs fixed:
+        1) hide "end of stream" error for a select in the "do" method
+	2) a insert statement executed more than once stored NULL into a 
+	   column everytime after the first NULL
+        3) makefile.pl: reference to the DBI-source directory changed to 
+           the DBI install directory
+        4) $dbh->tables method fixed
+	5) statement attribute "Hold" for select statements works now
+           correctly. Such a cursor survives a commit.
+	6) $dbh->do method use EXEC IMMEDIATE now only if no attr and 
+	   no bind_values are present. Otherwise it prepares and executes. 
+
+Version 1.0, initial release

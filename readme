@@ -7,14 +7,14 @@ distribution rights.
 
 BEFORE BUILDING, TESTING AND INSTALLING this you will need to:
 
-    Install the DBI module
+    Install the DBI module (I tested with DBI 1.14)
 
 BUILDING
 
     Unpack the DBD::RDB files and 
 	    perl Makefile.PL
-	    mms OR mmk
-	    mms install
-    The test script is up to now an example and not a standard perl test 
+	    mmk                    (or mms)
+	    mmk test
+	    mmk install
 
 End.

@@ -20,6 +20,10 @@
 	int connection;
 	int statement_nr;
 	int cursor_nr;
+	char date_format[256];
+	int date_len;
+        unsigned int date_in_context;
+        unsigned int date_out_context;
    };
 
    struct imp_sth_st {
@@ -31,6 +35,8 @@
 	char stmt_name[16];
 	char cur_name[16];
 	int hold;
+	short *original_type;
+	int *original_size;
 	sql_t_sqlda2 *in_sqlda;
 	sql_t_sqlda2 *out_sqlda;
    };
@@ -56,6 +62,7 @@
    #define dbd_st_prepare	rdb_st_prepare
    #define dbd_st_STORE_attrib  rdb_st_store_attrib
 
+//   #define dbd_db_do            rdb_db_do
    int rdb_db_do                _((SV *dbh, imp_dbh_t *imp_dbh, char *stmt ));
 
 

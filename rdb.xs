@@ -11,7 +11,7 @@ INCLUDE: Rdb.xsi
 MODULE = DBD::RDB      PACKAGE = DBD::RDB::db
 
 void
-do(dbh, statement)
+_do(dbh, statement)
     SV *	dbh
     SV *	statement
     CODE:
