@@ -280,7 +280,8 @@ int rdb_db_STORE_attrib( SV *dbh, imp_dbh_t *imp_dbh,
 	} else {    
 	    DBIc_off( imp_dbh, DBIcf_AutoCommit );
 	}
-    } else if ( !strcmp( key, "DateFormat" ) ) {
+    } else if ( !strcmp( key, "DateFormat" ) || 
+	        !strcmp( key, "rdb_dateformat" ) ) {
 	int status;
 	char *format_str;
 	unsigned int format_len;
@@ -327,7 +328,8 @@ SV* rdb_db_FETCH_attrib( SV *dbh, imp_dbh_t *imp_dbh, SV *keysv )
 	} else {    
 	    return &PL_sv_no;
 	}
-    } else if ( !strcmp( key, "DateFormat" ) ) {
+    } else if ( !strcmp( key, "DateFormat" ) || 
+	        !strcmp( key, "rdb_dateformat" ) ) {
 	return newSVpv( imp_dbh->date_format, 0 );
     } else {
 	return &PL_sv_undef;
@@ -426,8 +428,8 @@ int rdb_st_prepare( SV *sth, imp_sth_t *imp_sth, char *statement, SV *pattribs)
 
     if ( pattribs && SvROK(pattribs) && SvTYPE( SvRV(pattribs) ) ) {
 	attribs = (HV *)SvRV(pattribs);
-	if ( hv_exists(attribs,"Hold",4) ) {
-	    pvalue = hv_fetch(attribs,"Hold",4,0);
+	if ( hv_exists(attribs,"rdb_hold",8) ) {
+	    pvalue = hv_fetch(attribs,"rdb_hold",8,0);
 	    if ( SvTRUE( *pvalue ) ) {
 		imp_sth->hold = 1;
 	    } else {

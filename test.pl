@@ -66,7 +66,7 @@ printf("%sok 7\n", (( $ok && !$DBI::errstr) ? "" : "not "));
 #
 # get back default dateformat
 #
-my $df = $dbh->{DateFormat};
+my $df = $dbh->{rdb_dateformat};
 $ok = ( $df eq "|!Y4!MN0!D0|!H04!M0!S0!C2|" );
 printf("%sok 8\n", (( $ok && !$DBI::errstr) ? "" : "not "));
 
@@ -382,7 +382,7 @@ $dbh = DBI->connect( 'dbi:RDB: ATTACH FILENAME TEST.RDB', undef, undef,
 	               PrintError => $print_error, 
 		       AutoCommit => 0,
 		       ChopBlanks => 1,
-		       DateFormat => '|!DB-!MAAU-!Y4|!H04:!M0:!S0.!C2|' } );
+		       rdb_dateformat => '|!DB-!MAAU-!Y4|!H04:!M0:!S0.!C2|' } );
 printf("%sok 38\n", ($dbh ? "" : "not "));
 
 #
@@ -455,7 +455,7 @@ printf("%sok 41\n", ($ok ? "" : "not "));
 my $count;
 eval {
     $dbh->do( "set transaction read write" );
-    $dbh->{DateFormat} = q/|!Y4!MN0!D0|!H04!M0!S0!C2|/;
+    $dbh->{rdb_dateformat} = q/|!Y4!MN0!D0|!H04!M0!S0!C2|/;
     $st = $dbh->prepare( q/insert into dummy ( col_char, col_varchar, 
 				col_int, col_float, col_date, col_decimal, 
 				col_quad, col_intp2 )
@@ -488,7 +488,7 @@ printf("%sok 42\n", ($ok ? "" : "not "));
 eval {
     $dbh->do( "set transaction read write" );
     my $st1 = $dbh->prepare( "select col_date from dummy where " .
-			     "col_char = 'test_null'", { Hold => 1 } );
+			     "col_char = 'test_null'", { rdb_hold => 1 } );
     my $st2 = $dbh->prepare( "update dummy set col_varchar = 'gulp' " .
 			     "where current of $st1->{CursorName}" );
     $st1->execute;

@@ -1,3 +1,12 @@
+Version 1.11
+
+Bugs fixed:
+	1) in version 1.1 i use two driver specific database handle 
+	   attribute names: "DateFormat" and "Hold" which are not
+	   compliant to the DBI standard. They are changed to:
+	   "rdb_dateformat" and "rdb_hold"
+	   
+
 Version 1.1
   
 new:
@@ -7,7 +16,8 @@ new:
 	   "Programming the perl DBI"
 	
 bugs fixed:
-        1) hide "end of stream" error for a select in the "do" method
+        1) hide "end of stream" error for a "insert as select" in the "do" 
+           method
 	2) a insert statement executed more than once stored NULL into a 
 	   column everytime after the first NULL
         3) makefile.pl: reference to the DBI-source directory changed to 
